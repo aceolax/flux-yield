@@ -1,401 +1,446 @@
-;; FluxYield Music Streaming Smart Contract
-;; Revolutionary decentralized music streaming platform with dynamic yield farming for music rights
+;; FluxYield Music Streaming Platform
+;; Decentralized music streaming with tokenized rights and yield farming
 
-;; Error Constants
-(define-constant err-owner-only (err u100))
-(define-constant err-unauthorized (err u101))
-(define-constant err-invalid-amount (err u102))
-(define-constant err-insufficient-balance (err u103))
-(define-constant err-track-not-found (err u104))
-(define-constant err-track-already-minted (err u105))
-(define-constant err-consensus-not-reached (err u106))
-(define-constant err-invalid-royalty-score (err u107))
-(define-constant err-already-voted (err u108))
-(define-constant err-invalid-streaming-state (err u109))
-(define-constant err-rights-locked (err u110))
-(define-constant err-threshold-not-met (err u111))
-(define-constant err-temporal-state-invalid (err u112))
-(define-constant err-transfer-failed (err u113))
+;; =============================================================================
+;; ERROR CONSTANTS
+;; =============================================================================
+(define-constant ERR-UNAUTHORIZED (err u100))
+(define-constant ERR-INVALID-AMOUNT (err u101))
+(define-constant ERR-INSUFFICIENT-BALANCE (err u102))
+(define-constant ERR-TRACK-NOT-FOUND (err u103))
+(define-constant ERR-TRACK-ALREADY-MINTED (err u104))
+(define-constant ERR-CONSENSUS-NOT-REACHED (err u105))
+(define-constant ERR-ALREADY-VOTED (err u106))
+(define-constant ERR-INVALID-STATE (err u107))
+(define-constant ERR-DEADLINE-PASSED (err u108))
+(define-constant ERR-TRANSFER-FAILED (err u109))
 
-;; Contract Owner
-(define-constant contract-owner tx-sender)
+;; =============================================================================
+;; CONSTANTS AND VARIABLES
+;; =============================================================================
+(define-constant CONTRACT-OWNER tx-sender)
+(define-constant PLATFORM-FEE-RATE u250) ;; 2.5%
+(define-constant MIN-VOTE-THRESHOLD u1000)
+(define-constant REWARD-POOL-RATE u50) ;; 5%
+(define-constant COUNCIL-THRESHOLD u5000)
 
-;; Data Variables
-(define-data-var total-flux-tokens uint u0)
-(define-data-var streaming-mint-threshold uint u1000)
-(define-data-var platform-fee-rate uint u250) ;; 2.5%
+(define-data-var total-supply uint u0)
 (define-data-var next-track-id uint u1)
-(define-data-var dynamic-yield-multiplier uint u150)
-(define-data-var global-streaming-score uint u0)
-(define-data-var active-streaming-states uint u0)
-(define-data-var cross-platform-bridge-fee uint u100)
+(define-data-var yield-multiplier uint u150)
+(define-data-var global-streaming-volume uint u0)
 
-;; FluxYield Token Balances
-(define-map flux-token-balances principal uint)
+;; =============================================================================
+;; DATA MAPS
+;; =============================================================================
 
-;; Music Track Rights
-(define-map music-tracks
+;; Token balances for FluxYield tokens
+(define-map token-balances principal uint)
+
+;; Music track information
+(define-map tracks
   uint
   {
     creator: principal,
     title: (string-ascii 128),
     genre: (string-ascii 32),
-    requested-amount: uint,
+    funding-goal: uint,
     current-funding: uint,
-    streaming-state: (string-ascii 16),
-    consensus-votes: uint,
-    total-voters: uint,
+    status: (string-ascii 16),
+    votes: uint,
+    voter-count: uint,
     is-minted: bool,
     royalty-score: uint,
-    creation-time: uint,
-    mint-deadline: uint
+    created-at: uint,
+    deadline: uint
   }
 )
 
-;; Streaming Rights States
-(define-map streaming-rights-states
+;; Rights distribution for each track
+(define-map rights-distribution
   uint
   {
-    artist-probability: uint,
-    producer-probability: uint,
-    session-musician-probability: uint,
-    songwriter-probability: uint,
-    fan-holder-probability: uint,
-    total-probability: uint,
-    entangled-tracks: (list 10 uint)
+    artist-share: uint,
+    producer-share: uint,
+    songwriter-share: uint,
+    fan-share: uint,
+    total-shares: uint
   }
 )
 
-;; Proof of Listen Records
-(define-map listen-verifications
-  { user: principal, track-id: uint }
-  {
-    listen-type: (string-ascii 32),
-    stream-value: uint,
-    verification-time: uint,
-    verified-by: principal,
-    listen-coherence: uint
-  }
-)
-
-;; Voting Records
-(define-map track-votes
+;; User voting records
+(define-map votes
   { voter: principal, track-id: uint }
   {
-    vote-weight: uint,
-    vote-time: uint,
-    royalty-multiplier: uint,
-    streaming-alignment: uint
+    amount: uint,
+    timestamp: uint,
+    weight: uint
   }
 )
 
-;; Rights Council Members
-(define-map rights-council-members
+;; Listening verification records
+(define-map listen-records
+  { user: principal, track-id: uint }
+  {
+    listen-count: uint,
+    total-value: uint,
+    last-listen: uint,
+    verification-score: uint
+  }
+)
+
+;; Rights council members
+(define-map council-members
   principal
   {
-    total-streaming-contributions: uint,
-    governance-weight: uint,
-    verified-actions: uint,
-    coherence-rating: uint,
-    council-status: bool
+    contributions: uint,
+    voting-weight: uint,
+    verified-listens: uint,
+    reputation-score: uint,
+    is-active: bool
   }
 )
 
-;; Label Partnership Pods
-(define-map label-partnerships
+;; Label partnerships
+(define-map label-partners
   principal
   {
-    label-name: (string-ascii 64),
-    sponsored-amount: uint,
-    royalty-attribution: uint,
-    music-alignment: uint,
-    active-partnerships: uint
+    name: (string-ascii 64),
+    total-sponsored: uint,
+    active-deals: uint,
+    reputation: uint
   }
 )
 
-;; Temporal Streaming States
-(define-map temporal-streaming-states
-  uint
-  {
-    short-term-goals: (list 5 uint),
-    medium-term-goals: (list 5 uint),
-    long-term-goals: (list 5 uint),
-    timeline-probability: uint,
-    milestone-rewards: uint
-  }
-)
+;; =============================================================================
+;; PRIVATE HELPER FUNCTIONS
+;; =============================================================================
 
-;; Cross-Platform Bridge States
-(define-map cross-platform-resources
-  { platform-id: (string-ascii 16), track-id: uint }
-  {
-    locked-amount: uint,
-    bridge-status: (string-ascii 16),
-    target-platform: (string-ascii 32),
-    bridge-time: uint
-  }
-)
-
-;; Helper Functions
-(define-private (calculate-streaming-alignment (track-id uint) (user principal))
+(define-private (calculate-voting-weight (user principal) (base-amount uint))
   (let
     (
-      (user-balance (default-to u0 (map-get? flux-token-balances user)))
-      (council-data (map-get? rights-council-members user))
+      (user-balance (default-to u0 (map-get? token-balances user)))
+      (council-data (map-get? council-members user))
+      (is-council-member (match council-data
+        member (get is-active member)
+        false))
+      (multiplier (if is-council-member u150 u100))
     )
-    (if (is-some council-data)
-      (+ u100 (/ user-balance u10))
-      (+ u50 (/ user-balance u20))
-    )
+    (/ (* base-amount multiplier) u100)
   )
 )
 
-(define-private (calculate-listen-score (listen-type (string-ascii 32)) (stream-value uint))
+(define-private (calculate-listen-reward (listen-type (string-ascii 32)) (value uint))
   (let
     (
-      (base-coherence (var-get dynamic-yield-multiplier))
-      (value-multiplier (if (> stream-value u1000) u150 u100))
+      (base-rate (var-get yield-multiplier))
+      (type-multiplier (if (is-eq listen-type "premium") u200 u100))
     )
-    (/ (* base-coherence value-multiplier) u100)
+    (/ (* value base-rate type-multiplier) u10000)
   )
 )
 
-(define-private (transfer-flux-tokens (sender principal) (recipient principal) (amount uint))
+(define-private (transfer-tokens (from principal) (to principal) (amount uint))
   (let
     (
-      (sender-balance (default-to u0 (map-get? flux-token-balances sender)))
-      (recipient-balance (default-to u0 (map-get? flux-token-balances recipient)))
+      (from-balance (default-to u0 (map-get? token-balances from)))
+      (to-balance (default-to u0 (map-get? token-balances to)))
     )
-    (asserts! (>= sender-balance amount) err-insufficient-balance)
-    (map-set flux-token-balances sender (- sender-balance amount))
-    (map-set flux-token-balances recipient (+ recipient-balance amount))
-    (ok true)
+    (if (>= from-balance amount)
+      (begin
+        (map-set token-balances from (- from-balance amount))
+        (map-set token-balances to (+ to-balance amount))
+        (ok true))
+      ERR-INSUFFICIENT-BALANCE)
   )
 )
 
-(define-private (distribute-mint-rewards (track-id uint))
-  (let
-    (
-      (track-data (unwrap! (map-get? music-tracks track-id) err-track-not-found))
-      (total-votes (get consensus-votes track-data))
-      (reward-pool (/ (* (get requested-amount track-data) u50) u1000)) ;; 5% reward pool
+(define-private (distribute-rewards (track-id uint))
+  (match (map-get? tracks track-id)
+    track (let
+      (
+        (reward-pool (/ (* (get funding-goal track) REWARD-POOL-RATE) u1000))
+      )
+      (var-set global-streaming-volume 
+        (+ (var-get global-streaming-volume) (get royalty-score track)))
+      reward-pool
     )
-    (var-set global-streaming-score (+ (var-get global-streaming-score) (get royalty-score track-data)))
-    (ok reward-pool)
+    u0
   )
 )
 
-(define-private (update-rights-council-status (user principal) (contribution uint))
+(define-private (update-council-status (user principal) (contribution uint))
   (let
     (
-      (existing-data (map-get? rights-council-members user))
-      (current-contributions (if (is-some existing-data) 
-                             (get total-streaming-contributions (unwrap-panic existing-data)) u0))
-      (current-actions (if (is-some existing-data) 
-                       (get verified-actions (unwrap-panic existing-data)) u0))
+      (existing (map-get? council-members user))
+      (current-contributions (match existing
+        member (get contributions member)
+        u0))
       (new-total (+ current-contributions contribution))
-      (council-eligible (>= new-total u5000))
+      (qualifies (>= new-total COUNCIL-THRESHOLD))
     )
-    (map-set rights-council-members user
+    (map-set council-members user
       {
-        total-streaming-contributions: new-total,
-        governance-weight: (if council-eligible u150 u100),
-        verified-actions: (+ current-actions u1),
-        coherence-rating: (calculate-listen-score "verification" contribution),
-        council-status: council-eligible
-      }
-    )
-    true
+        contributions: new-total,
+        voting-weight: (if qualifies u150 u100),
+        verified-listens: (match existing
+          member (+ (get verified-listens member) u1)
+          u1),
+        reputation-score: (calculate-listen-reward "standard" contribution),
+        is-active: qualifies
+      })
+    qualifies
   )
 )
 
-;; Initialize FluxYield Tokens for User
-(define-public (mint-flux-tokens (recipient principal) (amount uint))
+;; =============================================================================
+;; PUBLIC FUNCTIONS
+;; =============================================================================
+
+;; Mint tokens (owner only)
+(define-public (mint-tokens (recipient principal) (amount uint))
   (begin
-    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
-    (asserts! (> amount u0) err-invalid-amount)
-    (map-set flux-token-balances recipient 
-      (+ (default-to u0 (map-get? flux-token-balances recipient)) amount))
-    (var-set total-flux-tokens (+ (var-get total-flux-tokens) amount))
-    (ok true)
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
+    (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+    
+    (map-set token-balances recipient 
+      (+ (default-to u0 (map-get? token-balances recipient)) amount))
+    (var-set total-supply (+ (var-get total-supply) amount))
+    (ok amount)
   )
 )
 
-;; Create Music Track Rights
-(define-public (create-streaming-track 
+;; Create a new music track for funding
+(define-public (create-track 
   (title (string-ascii 128))
   (genre (string-ascii 32))
-  (requested-amount uint)
-  (mint-deadline uint))
+  (funding-goal uint)
+  (deadline uint))
   (let
     (
       (track-id (var-get next-track-id))
-      (creator-balance (default-to u0 (map-get? flux-token-balances tx-sender)))
+      (creator-balance (default-to u0 (map-get? token-balances tx-sender)))
     )
-    (asserts! (>= creator-balance u100) err-insufficient-balance)
-    (asserts! (> requested-amount u0) err-invalid-amount)
-    (asserts! (> mint-deadline block-height) err-temporal-state-invalid)
+    (asserts! (>= creator-balance u100) ERR-INSUFFICIENT-BALANCE)
+    (asserts! (> funding-goal u0) ERR-INVALID-AMOUNT)
+    (asserts! (> deadline block-height) ERR-DEADLINE-PASSED)
     
-    (map-set music-tracks track-id
+    (map-set tracks track-id
       {
         creator: tx-sender,
         title: title,
         genre: genre,
-        requested-amount: requested-amount,
+        funding-goal: funding-goal,
         current-funding: u0,
-        streaming-state: "superposition",
-        consensus-votes: u0,
-        total-voters: u0,
+        status: "funding",
+        votes: u0,
+        voter-count: u0,
         is-minted: false,
         royalty-score: u0,
-        creation-time: block-height,
-        mint-deadline: mint-deadline
-      }
-    )
+        created-at: block-height,
+        deadline: deadline
+      })
     
-    (map-set streaming-rights-states track-id
+    (map-set rights-distribution track-id
       {
-        artist-probability: u200,
-        producer-probability: u200,
-        session-musician-probability: u200,
-        songwriter-probability: u200,
-        fan-holder-probability: u200,
-        total-probability: u1000,
-        entangled-tracks: (list)
-      }
-    )
+        artist-share: u400,     ;; 40%
+        producer-share: u200,   ;; 20%
+        songwriter-share: u200, ;; 20%
+        fan-share: u200,       ;; 20%
+        total-shares: u1000
+      })
     
     (var-set next-track-id (+ track-id u1))
-    (var-set active-streaming-states (+ (var-get active-streaming-states) u1))
     (ok track-id)
   )
 )
 
-;; Vote on Streaming Track with Royalty Weight
-(define-public (streaming-vote (track-id uint) (vote-power uint))
+;; Vote on a track with token weight
+(define-public (vote-on-track (track-id uint) (vote-amount uint))
   (let
     (
-      (track-data (unwrap! (map-get? music-tracks track-id) err-track-not-found))
-      (voter-balance (default-to u0 (map-get? flux-token-balances tx-sender)))
-      (council-data (map-get? rights-council-members tx-sender))
-      (governance-multiplier (if (is-some council-data) 
-                             (get governance-weight (unwrap-panic council-data)) u100))
-      (effective-vote-weight (/ (* vote-power governance-multiplier) u100))
+      (track (unwrap! (map-get? tracks track-id) ERR-TRACK-NOT-FOUND))
+      (voter-balance (default-to u0 (map-get? token-balances tx-sender)))
+      (vote-weight (calculate-voting-weight tx-sender vote-amount))
+      (existing-vote (map-get? votes {voter: tx-sender, track-id: track-id}))
     )
-    (asserts! (not (get is-minted track-data)) err-track-already-minted)
-    (asserts! (>= voter-balance vote-power) err-insufficient-balance)
-    (asserts! (is-none (map-get? track-votes {voter: tx-sender, track-id: track-id})) 
-              err-already-voted)
+    (asserts! (not (get is-minted track)) ERR-TRACK-ALREADY-MINTED)
+    (asserts! (>= voter-balance vote-amount) ERR-INSUFFICIENT-BALANCE)
+    (asserts! (is-none existing-vote) ERR-ALREADY-VOTED)
+    (asserts! (<= block-height (get deadline track)) ERR-DEADLINE-PASSED)
     
-    (map-set track-votes {voter: tx-sender, track-id: track-id}
+    ;; Record the vote
+    (map-set votes {voter: tx-sender, track-id: track-id}
       {
-        vote-weight: effective-vote-weight,
-        vote-time: block-height,
-        royalty-multiplier: governance-multiplier,
-        streaming-alignment: (calculate-streaming-alignment track-id tx-sender)
-      }
-    )
+        amount: vote-amount,
+        timestamp: block-height,
+        weight: vote-weight
+      })
     
-    (map-set music-tracks track-id
-      (merge track-data
+    ;; Update track vote totals
+    (map-set tracks track-id
+      (merge track
         {
-          consensus-votes: (+ (get consensus-votes track-data) effective-vote-weight),
-          total-voters: (+ (get total-voters track-data) u1)
-        }
-      )
-    )
+          votes: (+ (get votes track) vote-weight),
+          voter-count: (+ (get voter-count track) u1),
+          current-funding: (+ (get current-funding track) vote-amount)
+        }))
     
-    (try! (transfer-flux-tokens tx-sender (as-contract tx-sender) vote-power))
-    (ok true)
+    ;; Transfer tokens directly
+    (map-set token-balances tx-sender (- voter-balance vote-amount))
+    (map-set token-balances (as-contract tx-sender) 
+      (+ (default-to u0 (map-get? token-balances (as-contract tx-sender))) vote-amount))
+    (ok vote-weight)
   )
 )
 
-;; Mint Streaming Rights NFT
+;; Mint streaming rights NFT after successful funding
 (define-public (mint-streaming-rights (track-id uint))
   (let
     (
-      (track-data (unwrap! (map-get? music-tracks track-id) err-track-not-found))
-      (consensus-threshold (var-get streaming-mint-threshold))
+      (track (unwrap! (map-get? tracks track-id) ERR-TRACK-NOT-FOUND))
+      (reward-amount (distribute-rewards track-id))
     )
-    (asserts! (not (get is-minted track-data)) err-track-already-minted)
-    (asserts! (>= (get consensus-votes track-data) consensus-threshold) err-consensus-not-reached)
-    (asserts! (<= block-height (get mint-deadline track-data)) err-temporal-state-invalid)
+    (asserts! (not (get is-minted track)) ERR-TRACK-ALREADY-MINTED)
+    (asserts! (>= (get votes track) MIN-VOTE-THRESHOLD) ERR-CONSENSUS-NOT-REACHED)
+    (asserts! (>= (get current-funding track) (get funding-goal track)) ERR-CONSENSUS-NOT-REACHED)
+    (asserts! (<= block-height (get deadline track)) ERR-DEADLINE-PASSED)
     
-    (map-set music-tracks track-id
-      (merge track-data
+    (map-set tracks track-id
+      (merge track
         {
           is-minted: true,
-          streaming-state: "minted",
-          current-funding: (get requested-amount track-data)
-        }
-      )
-    )
+          status: "minted"
+        }))
     
-    (var-set active-streaming-states (- (var-get active-streaming-states) u1))
-    (try! (distribute-mint-rewards track-id))
-    (ok true)
+    (ok reward-amount)
   )
 )
 
-;; Submit Proof of Listen Verification
-(define-public (submit-listen-verification 
+;; Submit listening verification
+(define-public (verify-listen 
   (track-id uint)
   (listen-type (string-ascii 32))
   (stream-value uint))
   (let
     (
-      (track-data (unwrap! (map-get? music-tracks track-id) err-track-not-found))
-      (coherence-score (calculate-listen-score listen-type stream-value))
-      (reward-amount (/ (* stream-value coherence-score) u100))
+      (track (unwrap! (map-get? tracks track-id) ERR-TRACK-NOT-FOUND))
+      (existing-record (map-get? listen-records {user: tx-sender, track-id: track-id}))
+      (reward (calculate-listen-reward listen-type stream-value))
+      (current-count (match existing-record
+        record (get listen-count record)
+        u0))
+      (current-value (match existing-record
+        record (get total-value record)
+        u0))
     )
-    (asserts! (get is-minted track-data) err-invalid-streaming-state)
-    (asserts! (> stream-value u0) err-invalid-royalty-score)
+    (asserts! (get is-minted track) ERR-INVALID-STATE)
+    (asserts! (> stream-value u0) ERR-INVALID-AMOUNT)
     
-    (map-set listen-verifications {user: tx-sender, track-id: track-id}
+    ;; Update listen record
+    (map-set listen-records {user: tx-sender, track-id: track-id}
       {
-        listen-type: listen-type,
-        stream-value: stream-value,
-        verification-time: block-height,
-        verified-by: tx-sender,
-        listen-coherence: coherence-score
-      }
-    )
+        listen-count: (+ current-count u1),
+        total-value: (+ current-value stream-value),
+        last-listen: block-height,
+        verification-score: reward
+      })
     
-    (map-set flux-token-balances tx-sender 
-      (+ (default-to u0 (map-get? flux-token-balances tx-sender)) reward-amount))
-    (var-set total-flux-tokens (+ (var-get total-flux-tokens) reward-amount))
-    (update-rights-council-status tx-sender stream-value)
-    (ok true)
+    ;; Reward listener
+    (map-set token-balances tx-sender 
+      (+ (default-to u0 (map-get? token-balances tx-sender)) reward))
+    (var-set total-supply (+ (var-get total-supply) reward))
+    
+    ;; Update council status
+    (update-council-status tx-sender stream-value)
+    (ok reward)
   )
 )
 
-;; Label Sponsorship of Streaming Rights
-(define-public (sponsor-streaming-rights 
+;; Label sponsorship functionality
+(define-public (sponsor-track 
   (label-name (string-ascii 64))
   (track-id uint)
   (sponsor-amount uint))
   (let
     (
-      (track-data (unwrap! (map-get? music-tracks track-id) err-track-not-found))
-      (existing-partnership (map-get? label-partnerships tx-sender))
-      (current-sponsored (if (is-some existing-partnership) 
-                         (get sponsored-amount (unwrap-panic existing-partnership)) u0))
+      (track (unwrap! (map-get? tracks track-id) ERR-TRACK-NOT-FOUND))
+      (existing-partner (map-get? label-partners tx-sender))
+      (current-sponsored (match existing-partner
+        partner (get total-sponsored partner)
+        u0))
+      (sponsor-balance (default-to u0 (map-get? token-balances tx-sender)))
     )
-    (asserts! (not (get is-minted track-data)) err-track-already-minted)
-    (asserts! (> sponsor-amount u0) err-invalid-amount)
+    (asserts! (not (get is-minted track)) ERR-TRACK-ALREADY-MINTED)
+    (asserts! (> sponsor-amount u0) ERR-INVALID-AMOUNT)
+    (asserts! (>= sponsor-balance sponsor-amount) ERR-INSUFFICIENT-BALANCE)
     
-    (map-set label-partnerships tx-sender
+    ;; Update partnership record
+    (map-set label-partners tx-sender
       {
-        label-name: label-name,
-        sponsored-amount: (+ sponsor-amount current-sponsored),
-        royalty-attribution: (+ sponsor-amount current-sponsored),
-        music-alignment: u100,
-        active-partnerships: u1
-      }
-    )
+        name: label-name,
+        total-sponsored: (+ current-sponsored sponsor-amount),
+        active-deals: (match existing-partner
+          partner (+ (get active-deals partner) u1)
+          u1),
+        reputation: u100
+      })
     
     ;; Update track funding
-    (map-set music-tracks track-id
-      (merge track-data
+    (map-set tracks track-id
+      (merge track
         {
-          current-funding: (+ (get current-funding track-data) sponsor-
+          current-funding: (+ (get current-funding track) sponsor-amount)
+        }))
+    
+    ;; Transfer sponsorship tokens directly
+    (map-set token-balances tx-sender (- sponsor-balance sponsor-amount))
+    (map-set token-balances (as-contract tx-sender) 
+      (+ (default-to u0 (map-get? token-balances (as-contract tx-sender))) sponsor-amount))
+    (ok true)
+  )
+)
+
+;; =============================================================================
+;; READ-ONLY FUNCTIONS
+;; =============================================================================
+
+(define-read-only (get-token-balance (user principal))
+  (default-to u0 (map-get? token-balances user))
+)
+
+(define-read-only (get-track-info (track-id uint))
+  (map-get? tracks track-id)
+)
+
+(define-read-only (get-rights-distribution (track-id uint))
+  (map-get? rights-distribution track-id)
+)
+
+(define-read-only (get-vote-info (voter principal) (track-id uint))
+  (map-get? votes {voter: voter, track-id: track-id})
+)
+
+(define-read-only (get-listen-stats (user principal) (track-id uint))
+  (map-get? listen-records {user: user, track-id: track-id})
+)
+
+(define-read-only (get-council-status (user principal))
+  (map-get? council-members user)
+)
+
+(define-read-only (get-label-info (label principal))
+  (map-get? label-partners label)
+)
+
+(define-read-only (get-total-supply)
+  (var-get total-supply)
+)
+
+(define-read-only (get-global-stats)
+  {
+    total-supply: (var-get total-supply),
+    next-track-id: (var-get next-track-id),
+    yield-multiplier: (var-get yield-multiplier),
+    streaming-volume: (var-get global-streaming-volume)
+  }
+)
